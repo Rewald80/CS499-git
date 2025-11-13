@@ -14,15 +14,15 @@ class FlowerClient(fl.client.NumPyClient):
         self.val_loader = val_loader
         self.device = device
 
-    def get_parameters(self):
+    def get_parameters(self, config=None):
         return [val.cpu().numpy() for _, val in self.model.state_dict().items()]
 
-    def set_parameters(self, parameters):
+    def set_parameters(self, parameters, config=None):
         params_dict = zip(self.model.state_dict().keys(), parameters)
         new_state_dict = {k: torch.tensor(v) for k, v in params_dict}
         self.model.load_state_dict(new_state_dict, strict=False)
 
-    def fit(self, parameters, config):
+    def fit(self, parameters, config=None):
         # set global weights
         self.set_parameters(parameters)
         # local training (very small local epochs for demo)
@@ -30,7 +30,7 @@ class FlowerClient(fl.client.NumPyClient):
         # return updated params
         return self.get_parameters(), len(self.train_loader.dataset), {}
 
-    def evaluate(self, parameters, config):
+    def evaluate(self, parameters, config=None):
         self.set_parameters(parameters)
         loss, acc = evaluate_local(self.model, self.val_loader, self.device)
         return float(loss), len(self.val_loader.dataset), {"accuracy": float(acc)}
@@ -71,7 +71,7 @@ def evaluate_local(model, val_loader, device):
 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser()
-    parser.add_argument("--data", required=True, help="path to this client's data folder (ImageFolder format)")
+    parser.add_argument("--data", type=str, default="app/Test_images")
     args = parser.parse_args()
     # Load model and data
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
@@ -79,4 +79,4 @@ if __name__ == "__main__":
     train_loader, val_loader = make_dataloaders(args.data, batch_size=16)
     # Wrap client and start
     client = FlowerClient(model, train_loader, val_loader, device)
-    fl.client.start_numpy_client(server_address="127.0.0.1:8080", client=client)
+    fl.client.start_client(server_address="127.0.0.1:8080", client=client.to_client())

@@ -2,7 +2,7 @@ import torch
 import torch.nn as nn
 from torch.optim import AdamW
 from sklearn.metrics import classification_report
-from app.models.py import get_detector_model
+from app.models import get_detector_model
 from app.data import make_dataloaders
 import os
 
@@ -72,7 +72,7 @@ def train_local(data_dir: str, epochs: int = 5, batch_size: int = 32, checkpoint
 if __name__ == "__main__":
     import argparse
     parser = argparse.ArgumentParser()
-    parser.add_argument("--data", default="./dataset", help="training data root")
+    parser.add_argument("--data", default="./Test_images", help="training data root")
     parser.add_argument("--epochs", type=int, default=3)
     parser.add_argument("--batch", type=int, default=16)
     parser.add_argument("--out", default="model.pt")

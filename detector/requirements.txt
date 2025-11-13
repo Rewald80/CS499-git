@@ -1,11 +1,11 @@
 makefile
 
-fastapi==0.95.2
-uvicorn[standard]==0.22.0
-torch==2.1.0
-torchvision==0.16.0
-pillow==9.5.0
-numpy==1.26.0
-flwr==1.10.0
-scikit-learn==1.3.0
-kaggle==1.5.16
+fastapi
+uvicorn[standard]
+torch
+torchvision
+pillow
+numpy
+flwr
+scikit-learn
+kaggle
