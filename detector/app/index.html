@@ -1,0 +1,173 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <title>Deepfake Detector</title>
+    <style>
+        body {
+            font-family: Arial, sans-serif;
+            text-align: center;
+            margin: 50px;
+        }
+        #drop-zone {
+            border: 2px dashed #007bff;
+            padding: 50px;
+            margin-bottom: 20px;
+            cursor: pointer;
+            color: #555;
+        }
+        #drop-zone.hover {
+            background-color: #e3f2fd;
+        }
+        #gallery {
+            display: flex;
+            flex-wrap: wrap;
+            gap: 15px;
+            justify-content: center;
+        }
+        .image-card {
+            position: relative;
+            border: 4px solid #ccc;
+            padding: 5px;
+            border-radius: 8px;
+            width: 200px;
+        }
+        .image-card img {
+            width: 100%;
+            height: auto;
+            border-radius: 4px;
+        }
+        .probability {
+            margin-top: 5px;
+            font-weight: bold;
+        }
+        .real { border-color: green; }
+        .fake { border-color: red; }
+
+        .btn {
+            margin: 10px;
+            padding: 10px 20px;
+            font-size: 16px;
+            cursor: pointer;
+        }
+        #train-status, #server-status {
+            margin-top: 5px;
+            font-weight: bold;
+        }
+    </style>
+</head>
+<body>
+    <h1>Deepfake Detector</h1>
+
+    <!-- Buttons -->
+    <div>
+        <button id="train-btn" class="btn">Start Training</button>
+        <div id="train-status"></div>
+
+        <button id="start-server-btn" class="btn">Start FLWR Server</button>
+        <div id="server-status"></div>
+    </div>
+
+    <!-- Image Upload -->
+    <div id="drop-zone">Drag & Drop an image here or click to select</div>
+    <input type="file" id="file-input" style="display:none" accept="image/*">
+    <div id="gallery"></div>
+
+    <script>
+        // ===== Flower Server Button =====
+        const startServerBtn = document.getElementById("start-server-btn");
+        const serverStatus = document.getElementById("server-status");
+
+        startServerBtn.addEventListener("click", async () => {
+            serverStatus.textContent = "Starting Flower server...";
+            try {
+                const response = await fetch("/start-fl-server", { method: "POST" });
+                const data = await response.json();
+                serverStatus.textContent = data.status;
+            } catch (err) {
+                serverStatus.textContent = `Error: ${err.message}`;
+            }
+        });
+
+        // ===== Training Button =====
+        const trainBtn = document.getElementById("train-btn");
+        const trainStatus = document.getElementById("train-status");
+
+        trainBtn.addEventListener("click", async () => {
+            trainStatus.textContent = "Starting federated learning training...";
+            try {
+                const response = await fetch("/start-training", { method: "POST" });
+                const data = await response.json();
+                trainStatus.textContent = data.status;
+            } catch (err) {
+                trainStatus.textContent = `Error: ${err.message}`;
+            }
+        });
+
+        // ===== Image Upload & Prediction =====
+        const dropZone = document.getElementById('drop-zone');
+        const fileInput = document.getElementById('file-input');
+        const gallery = document.getElementById('gallery');
+
+        dropZone.addEventListener('click', () => fileInput.click());
+
+        dropZone.addEventListener('dragover', (e) => {
+            e.preventDefault();
+            dropZone.classList.add('hover');
+        });
+
+        dropZone.addEventListener('dragleave', () => dropZone.classList.remove('hover'));
+
+        dropZone.addEventListener('drop', (e) => {
+            e.preventDefault();
+            dropZone.classList.remove('hover');
+            const files = Array.from(e.dataTransfer.files);
+            files.forEach(uploadImage);
+        });
+
+        fileInput.addEventListener('change', () => {
+            Array.from(fileInput.files).forEach(uploadImage);
+        });
+
+        async function uploadImage(file) {
+            const reader = new FileReader();
+            reader.onload = (e) => {
+                const card = document.createElement('div');
+                card.className = 'image-card';
+                const img = document.createElement('img');
+                img.src = e.target.result;
+                const prob = document.createElement('div');
+                prob.className = 'probability';
+                prob.textContent = 'Analyzing...';
+                card.appendChild(img);
+                card.appendChild(prob);
+                gallery.appendChild(card);
+
+                analyzeImage(file, prob, card);
+            };
+            reader.readAsDataURL(file);
+        }
+
+        async function analyzeImage(file, probElem, cardElem) {
+            const formData = new FormData();
+            formData.append("file", file);
+
+            try {
+                const response = await fetch("/predict", { method: "POST", body: formData });
+                if (!response.ok) throw new Error(`Server error: ${response.status}`);
+                const data = await response.json();
+                const probability = (data.probability_fake * 100).toFixed(2);
+                probElem.textContent = `Probability Fake: ${probability}%`;
+
+                if (data.probability_fake >= 0.5) {
+                    cardElem.classList.add('fake');
+                } else {
+                    cardElem.classList.add('real');
+                }
+            } catch (err) {
+                probElem.textContent = `Error: ${err.message}`;
+            }
+        }
+    </script>
+</body>
+</html>

@@ -1,0 +1,85 @@
+body {
+    font-family: Arial, sans-serif;
+    background: #f4f4f4;
+}
+
+.container {
+    max-width: 1100px;
+    margin: auto;
+    text-align: center;
+    padding: 20px;
+}
+
+form {
+    margin-bottom: 30px;
+}
+
+.gallery-grid {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
+    gap: 20px;
+    justify-items: center;
+    padding: 10px;
+}
+
+.gallery-card {
+    background: white;
+    border-radius: 10px;
+    padding: 15px;
+    width: 220px;
+    box-shadow: 0 2px 8px rgba(0,0,0,0.12);
+}
+
+.gallery-img {
+    width: 100%;
+    height: 180px;
+    object-fit: cover;     /* ⬅ makes all thumbnails uniform */
+    border-radius: 8px;
+}
+
+.image-grid {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(260px, 1fr));
+    gap: 20px;
+    max-width: 900px;
+    margin: 0 auto;
+    padding: 20px;
+}
+
+.image-item {
+    text-align: center;
+    padding: 10px;
+    border-radius: 10px;
+    background: #fafafa;
+    box-shadow: 0 0 10px rgba(0,0,0,0.1);
+}
+
+.image-item img {
+    width: 256px;
+    height: 256px;
+    object-fit: cover;
+    border-radius: 8px;
+}
+
+.label {
+    margin-top: 10px;
+    font-weight: bold;
+    padding: 6px;
+    border-radius: 6px;
+    font-size: 16px;
+}
+
+.label.real {
+    background: #c8ffc8;
+    border: 2px solid #2e8b2e;
+}
+
+.label.deepfake {
+    background: #ffd0d0;
+    border: 2px solid #b62424;
+}
+
+.filename {
+    margin-top: 8px;
+    font-size: 14px;
+}

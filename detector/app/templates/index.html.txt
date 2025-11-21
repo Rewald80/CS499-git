@@ -1,0 +1,33 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <title>Deepfake Detector</title>
+    <link rel="stylesheet" href="/static/css/styles.css">
+</head>
+<body>
+    <div class="container">
+        <h1>Deepfake Detector</h1>
+
+        <!-- Upload Form -->
+        <form action="/upload-image" method="post" enctype="multipart/form-data">
+            <input type="file" name="image" accept="image/*" required>
+            <button type="submit">Upload & Detect</button>
+        </form>
+
+        <!-- Uploaded Images Grid -->
+        <div class="image-grid">
+    {% for item in upload_results %}
+    <div class="image-item">
+        <img src="/uploads/{{ item.file }}?v={{ loop.index }}" alt="{{ item.file }}">
+        <div class="filename">{{ item.file }}</div>
+        <div class="label {% if item.result == 'Real' %}real{% else %}deepfake{% endif %}">
+            {{ item.result }}
+        </div>
+    </div>
+    {% endfor %}
+</div>
+
+    </div>
+</body>
+</html>

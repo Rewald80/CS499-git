@@ -8,4 +8,25 @@ pillow
 numpy
 flwr
 scikit-learn
-kaggle
+Kaggle
+
+from flwr_client.py
+# utility local training/eval functions (minimal)
+def train_local_local(model, train_loader, device, epochs=1):
+    import torch.nn as nn
+    from torch.optim import AdamW
+    model.to(device)
+    model.train()
+    criterion = nn.CrossEntropyLoss()
+    optimizer = AdamW(model.parameters(), lr=1e-4)
+    for _ in range(epochs):
+        for x,y in train_loader:
+            x,y = x.to(device), y.to(device)
+            optimizer.zero_grad()
+            out = model(x)
+            loss = criterion(out,y)
+            loss.backward()
+            optimizer.step()
+
+
+    data_path = args.data or os.environ.get("DATA_ROOT", "app/Test_images")
