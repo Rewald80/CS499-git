@@ -8,7 +8,6 @@ def load_model(checkpoint_path=None):
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
     model = get_detector_model()
     
-    # default checkpoint path
     if checkpoint_path is None:
         checkpoint_path = Path(__file__).parent.parent / "model.pt"
     
@@ -34,5 +33,5 @@ def predict_image_pil(model, device, pil_image: Image.Image):
     with torch.no_grad():
         out = model(img)
         probs = torch.softmax(out, dim=1)
-        prob_fake = float(probs[0, 1].item())  # class 1 = fake
+        prob_fake = float(probs[0, 1].item())
     return prob_fake

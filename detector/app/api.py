@@ -56,7 +56,7 @@ model.eval()
 # Image transform
 # --------------------------------------------
 model_transform = transforms.Compose([
-    transforms.Resize((224, 224)),
+    transforms.Resize((256, 256)),
     transforms.ToTensor(),
 ])
 

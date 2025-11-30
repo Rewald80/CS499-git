@@ -1,4 +1,3 @@
-# server.py
 import flwr as fl
 import torch
 from pathlib import Path

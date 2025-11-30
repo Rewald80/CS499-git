@@ -8,165 +8,188 @@ from sklearn.metrics import classification_report
 from tqdm import tqdm
 import argparse
 
-# -----------------------------
-# Model definition
-# -----------------------------
-def get_detector_model(pretrained=True):
-    model = models.resnet18(weights=models.ResNet18_Weights.DEFAULT if pretrained else None)
-    model.fc = nn.Linear(model.fc.in_features, 2)  # real vs fake
+# ---------------------------------
+# ARGUMENT PARSING
+# ---------------------------------
+parser = argparse.ArgumentParser()
+parser.add_argument("--data", type=str, default="Dataset", help="Path to dataset folder")
+parser.add_argument("--epochs", type=int, default=10, help="Number of epochs")
+parser.add_argument("--batch", type=int, default=32, help="Batch size")
+parser.add_argument("--lr", type=float, default=0.0003, help="Learning rate")
+parser.add_argument("--deep", action="store_true", help="Use ResNet34 instead of ResNet18")
+parser.add_argument("--full-finetune", action="store_true", help="Unfreeze full model")
+args = parser.parse_args()
+
+# ---------------------------------
+# DEVICE
+# ---------------------------------
+device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+print(f"\n🚀 Using device: {device}")
+
+# ---------------------------------
+# TRANSFORMS
+# ---------------------------------
+IMG_SIZE = 224
+
+train_transform = transforms.Compose([
+    transforms.Resize((IMG_SIZE, IMG_SIZE)),
+    transforms.RandomHorizontalFlip(),
+    transforms.ColorJitter(brightness=0.2, contrast=0.2, saturation=0.2),
+    transforms.RandomRotation(10),
+    transforms.ToTensor(),
+    transforms.Normalize(mean=[0.485,0.456,0.406], std=[0.229,0.224,0.225])
+])
+
+val_transform = transforms.Compose([
+    transforms.Resize((IMG_SIZE, IMG_SIZE)),
+    transforms.ToTensor(),
+    transforms.Normalize(mean=[0.485,0.456,0.406], std=[0.229,0.224,0.225])
+])
+
+
+# ---------------------------------
+# DATASET LOAD
+# ---------------------------------
+train_dir = os.path.join(args.data, "train")
+val_dir = os.path.join(args.data, "val")
+
+train_data = datasets.ImageFolder(train_dir, transform=train_transform)
+val_data = datasets.ImageFolder(val_dir, transform=val_transform)
+
+train_loader = DataLoader(train_data, batch_size=args.batch, shuffle=True, num_workers=2)
+val_loader = DataLoader(val_data, batch_size=args.batch, shuffle=False, num_workers=2)
+
+print(f"\n📁 Train samples: {len(train_data)}")
+print(f"📁 Val samples: {len(val_data)}")
+
+# ---------------------------------
+# MODEL
+# ---------------------------------
+
+def get_model():
+    if args.deep:
+        print("\n🧠 Using ResNet34")
+        model = models.resnet34(weights=models.ResNet34_Weights.DEFAULT)
+    else:
+        print("\n🧠 Using ResNet18")
+        model = models.resnet18(weights=models.ResNet18_Weights.DEFAULT)
+
+    # Freeze model first
+    for param in model.parameters():
+        param.requires_grad = False
+
+    # Replace classification layer
+    num_features = model.fc.in_features
+    model.fc = nn.Sequential(
+        nn.Linear(num_features, 256),
+        nn.ReLU(),
+        nn.Dropout(0.3),
+        nn.Linear(256, 2)
+    )
+
+    # Allow classifier head to train
+    for param in model.fc.parameters():
+        param.requires_grad = True
+
+    if args.full_finetune:
+        print("🔓 Full model fine-tuning enabled")
+        for param in model.parameters():
+            param.requires_grad = True
+
     return model
 
-# -----------------------------
-# Dataloaders with augmentation
-# -----------------------------
-def make_dataloaders(train_dir, val_dir, batch_size=32):
-    IMG_SIZE = 224
 
-    transform_train = transforms.Compose([
-        transforms.Resize((IMG_SIZE, IMG_SIZE)),
-        transforms.RandomHorizontalFlip(),
-        transforms.RandomRotation(10),
-        transforms.ColorJitter(brightness=0.2, contrast=0.2),
-        transforms.ToTensor(),
-        transforms.Normalize(mean=[0.485,0.456,0.406], std=[0.229,0.224,0.225])
-    ])
+def unfreeze_last_block(model):
+    for name, param in model.named_parameters():
+        if "layer4" in name:
+            param.requires_grad = True
 
-    transform_val = transforms.Compose([
-        transforms.Resize((IMG_SIZE, IMG_SIZE)),
-        transforms.ToTensor(),
-        transforms.Normalize(mean=[0.485,0.456,0.406], std=[0.229,0.224,0.225])
-    ])
 
-    train_dataset = datasets.ImageFolder(train_dir, transform=transform_train)
-    val_dataset = datasets.ImageFolder(val_dir, transform=transform_val)
+model = get_model().to(device)
 
-    train_loader = DataLoader(train_dataset, batch_size=batch_size, shuffle=True, num_workers=4)
-    val_loader = DataLoader(val_dataset, batch_size=batch_size, shuffle=False, num_workers=4)
+# ---------------------------------
+# LOSS + OPTIMIZER + SCHEDULER
+# ---------------------------------
+criterion = nn.CrossEntropyLoss(label_smoothing=0.1)
+optimizer = AdamW(filter(lambda p: p.requires_grad, model.parameters()), lr=args.lr)
+scheduler = torch.optim.lr_scheduler.StepLR(optimizer, step_size=2, gamma=0.3)
 
-    return train_loader, val_loader
+# ---------------------------------
+# TRAINING
+# ---------------------------------
+best_val_acc = 0.0
 
-# -----------------------------
-# Training function
-# -----------------------------
-def train_local(train_dir, val_dir, epochs=10, batch_size=16, checkpoint_path="model.pt", device=None):
-    device = device or (torch.device("cuda") if torch.cuda.is_available() else torch.device("cpu"))
-    print(f"\n🚀 Using device: {device}\n")
+for epoch in range(args.epochs):
+    print(f"\n📘 Epoch {epoch+1}/{args.epochs}")
 
-    # Debug directory print
-    train_dir = os.path.abspath(train_dir)
-    val_dir = os.path.abspath(val_dir)
+    # Progressive unfreezing
+    if epoch == 3 and not args.full_finetune:
+        print("🔓 Unfreezing final ResNet block...")
+        unfreeze_last_block(model)
 
-    print(f"📁 Using Train Directory: {train_dir}")
-    print(f"📁 Using Val Directory:   {val_dir}\n")
+    # ------- TRAIN -------
+    model.train()
+    train_loss = 0
+    train_correct = 0
 
-    print("🔍 Checking folder structure...")
-    print("Train:", os.listdir(train_dir))
-    print("Validation:", os.listdir(val_dir))
+    for images, labels in tqdm(train_loader, desc="Training"):
+        images, labels = images.to(device), labels.to(device)
 
-    # Load model
-    model = get_detector_model(pretrained=True).to(device)
+        optimizer.zero_grad()
 
-    # Load data
-    train_loader, val_loader = make_dataloaders(train_dir, val_dir, batch_size=batch_size)
+        outputs = model(images)
+        loss = criterion(outputs, labels)
 
-    print("\n📚 Classes found:", train_loader.dataset.classes)
-    print(f"🖼️ Training images:   {len(train_loader.dataset)}")
-    print(f"🖼️ Validation images: {len(val_loader.dataset)}\n")
+        loss.backward()
+        optimizer.step()
 
-    criterion = nn.CrossEntropyLoss()
-    optimizer = AdamW(model.parameters(), lr=1e-4, weight_decay=1e-4)
+        _, preds = torch.max(outputs, 1)
+        train_correct += (preds == labels).sum().item()
+        train_loss += loss.item()
 
-    best_val_loss = float('inf')
+    train_acc = train_correct / len(train_data)
+    train_loss /= len(train_loader)
 
-    for epoch in range(1, epochs + 1):
-        print(f"\n====== Epoch {epoch}/{epochs} ======")
+    # ------- VALIDATE -------
+    model.eval()
+    val_loss = 0
+    val_correct = 0
+    all_preds = []
+    all_labels = []
 
-        # ------------------------------
-        # TRAINING
-        # ------------------------------
-        model.train()
-        running_loss = 0
-        correct = 0
-        total = 0
+    with torch.no_grad():
+        for images, labels in tqdm(val_loader, desc="Validating"):
+            images, labels = images.to(device), labels.to(device)
+            outputs = model(images)
 
-        train_prog = tqdm(train_loader, desc="Training", ncols=100)
-
-        for inputs, labels in train_prog:
-            inputs, labels = inputs.to(device), labels.to(device)
-
-            optimizer.zero_grad()
-            outputs = model(inputs)
             loss = criterion(outputs, labels)
-            loss.backward()
-            optimizer.step()
+            val_loss += loss.item()
 
-            running_loss += loss.item() * inputs.size(0)
             _, preds = torch.max(outputs, 1)
-            correct += (preds == labels).sum().item()
-            total += labels.size(0)
+            val_correct += (preds == labels).sum().item()
 
-            train_prog.set_postfix(loss=loss.item())
+            all_preds.extend(preds.cpu().numpy())
+            all_labels.extend(labels.cpu().numpy())
 
-        train_loss = running_loss / total
-        train_acc = correct / total
+    val_acc = val_correct / len(val_data)
+    val_loss /= len(val_loader)
 
-        # ------------------------------
-        # VALIDATION
-        # ------------------------------
-        model.eval()
-        val_loss = 0
-        val_correct = 0
-        val_total = 0
-        y_true, y_pred = [], []
+    scheduler.step()
 
-        val_prog = tqdm(val_loader, desc="Validation", ncols=100)
+    print(f"\n📊 Results:")
+    print(f"Train Loss: {train_loss:.4f}, Train Acc: {train_acc:.4f}")
+    print(f"Val Loss:   {val_loss:.4f}, Val Acc:   {val_acc:.4f}")
 
-        with torch.no_grad():
-            for inputs, labels in val_prog:
-                inputs, labels = inputs.to(device), labels.to(device)
+    # Save best model
+    if val_acc > best_val_acc:
+        best_val_acc = val_acc
+        torch.save(model.state_dict(), "model.pt")
+        print("💾 Saved new best model → model.pt")
 
-                outputs = model(inputs)
-                loss = criterion(outputs, labels)
+# ---------------------------------
+# FINAL REPORT
+# ---------------------------------
+print("\n✅ Training complete!")
 
-                val_loss += loss.item() * inputs.size(0)
-                _, preds = torch.max(outputs, 1)
-                val_correct += (preds == labels).sum().item()
-                val_total += labels.size(0)
-
-                y_true.extend(labels.cpu().tolist())
-                y_pred.extend(preds.cpu().tolist())
-
-                val_prog.set_postfix(loss=loss.item())
-
-        val_loss /= val_total
-        val_acc = val_correct / val_total
-
-        print(f"\n📊 Epoch {epoch} Results:")
-        print(f"   Train Loss: {train_loss:.4f}, Train Acc: {train_acc:.4f}")
-        print(f"   Val Loss:   {val_loss:.4f}, Val Acc:   {val_acc:.4f}")
-
-        # Save best model
-        if val_loss < best_val_loss:
-            best_val_loss = val_loss
-            torch.save(model.state_dict(), checkpoint_path)
-            print(f"💾 Saved new best model → {checkpoint_path}")
-
-    print("\n🎉 Training complete!")
-    print("📈 Final Classification Report:")
-    print(classification_report(y_true, y_pred, target_names=['fake', 'real']))
-
-    return checkpoint_path
-
-# -----------------------------
-# CLI
-# -----------------------------
-if __name__ == "__main__":
-    parser = argparse.ArgumentParser()
-    parser.add_argument("--train", default="./Dataset/Train", help="Path to training data")
-    parser.add_argument("--val",   default="./Dataset/Validation", help="Path to validation data")
-    parser.add_argument("--epochs", type=int, default=10)
-    parser.add_argument("--batch",  type=int, default=16)
-    parser.add_argument("--out",    default="model.pt")
-    args = parser.parse_args()
-
-    train_local(args.train, args.val, epochs=args.epochs, batch_size=args.batch, checkpoint_path=args.out)
+print("\n📋 Final Classification Report:")
+print(classification_report(all_labels, all_preds, target_names=["fake", "real"]))
