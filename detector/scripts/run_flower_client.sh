@@ -1,1 +1,0 @@
-python flwr_client.py --data ./client_dataset

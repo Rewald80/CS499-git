@@ -27,7 +27,6 @@ class FlowerClient(fl.client.NumPyClient):
 
     def evaluate(self, parameters, config=None):
         self.set_parameters(parameters)
-        # Optional local evaluation
         return 0.0, len(self.val_loader.dataset), {}
 
 if __name__ == "__main__":

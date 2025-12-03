@@ -1,1 +1,0 @@
-python -m app.train --data ./dataset --epochs 3 --batch 16 --out model.pt

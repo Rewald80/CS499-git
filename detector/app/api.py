@@ -1,7 +1,7 @@
 import os
 import threading
 from fastapi import FastAPI, Request, UploadFile, File
-from fastapi.responses import HTMLResponse, JSONResponse
+from fastapi.responses import HTMLResponse, JSONResponse, FileResponse
 from fastapi.staticfiles import StaticFiles
 from starlette.templating import Jinja2Templates
 from PIL import Image
@@ -9,9 +9,6 @@ import torch
 import torchvision.transforms as transforms
 import torchvision.models as models
 from io import BytesIO
-from fastapi.responses import FileResponse
-
-
 
 # --------------------------------------------
 # App setup
@@ -22,46 +19,62 @@ app.mount("/static", StaticFiles(directory="app/static"), name="static")
 app.mount("/uploads", StaticFiles(directory="app/uploads"), name="uploads")
 os.makedirs("app/uploads", exist_ok=True)
 
-
+# --------------------------------------------
+# Display uploaded images without caching
+# --------------------------------------------
 @app.get("/uploads/{filename}")
 async def get_uploaded_image(filename: str):
     file_path = os.path.join("app/uploads", filename)
     if not os.path.exists(file_path):
         return JSONResponse({"error": "File not found"}, status_code=404)
-    # Disable caching
     return FileResponse(file_path, headers={"Cache-Control": "no-cache"})
 
 # --------------------------------------------
-# Upload results list
+# Upload results history
 # --------------------------------------------
-upload_results = []   # [{ "file": "image.jpg", "result": "Real" }]
+upload_results = []  
 MAX_HISTORY = 25
 
 # --------------------------------------------
-# Load model
+# Load Model
 # --------------------------------------------
-model = models.resnet18(weights=None)
-model.fc = torch.nn.Linear(model.fc.in_features, 2)
+device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 
-checkpoint_path = "detector/app/model.pt"
+print("\nLoading ResNet18 model...")
+model = models.resnet18(weights=None)
+
+model.fc = torch.nn.Sequential(
+    torch.nn.Linear(model.fc.in_features, 256),
+    torch.nn.ReLU(),
+    torch.nn.Dropout(0.3),
+    torch.nn.Linear(256, 2)
+)
+
+checkpoint_path = os.path.join(os.path.dirname(__file__), "model.pt")
 if os.path.exists(checkpoint_path):
-    checkpoint = torch.load(checkpoint_path, map_location="cpu")
-    model.load_state_dict(checkpoint)
+    print(f"Loading weights from {checkpoint_path}")
+    state_dict = torch.load(checkpoint_path, map_location=device)
+    model.load_state_dict(state_dict)
 else:
     print("⚠ WARNING: No model checkpoint found!")
 
+model = model.to(device, memory_format=torch.channels_last)
 model.eval()
 
 # --------------------------------------------
-# Image transform
+# Image Transform
 # --------------------------------------------
 model_transform = transforms.Compose([
-    transforms.Resize((256, 256)),
+    transforms.Resize((224, 224)),
     transforms.ToTensor(),
+    transforms.Normalize(
+        mean=[0.485, 0.456, 0.406],
+        std=[0.229, 0.224, 0.225]
+    )
 ])
 
 # --------------------------------------------
-# Federated Learning
+# Federated Learning Server
 # --------------------------------------------
 def start_fl_server():
     import flwr as fl
@@ -73,8 +86,15 @@ def start_fl_server():
     except Exception as e:
         print("FL server error:", e)
 
+
+@app.post("/start-fl-server")
+async def start_fl_training():
+    thread = threading.Thread(target=start_fl_server, daemon=True)
+    thread.start()
+    return JSONResponse({"status": "Federated Learning training started!"})
+
 # --------------------------------------------
-# Routes
+# ROUTES
 # --------------------------------------------
 @app.get("/", response_class=HTMLResponse)
 async def index(request: Request):
@@ -86,27 +106,28 @@ async def index(request: Request):
         }
     )
 
+# --------------------------------------------
+# UPLOAD & DETECT DEEPFAKE
+# --------------------------------------------
 @app.post("/upload-image")
 async def upload_image(request: Request, image: UploadFile = File(...)):
     try:
-        # --- Save a display-sized version (256x256) ---
         contents = await image.read()
-        img_display = Image.open(BytesIO(contents)).convert("RGB")
-        img_display = img_display.resize((256, 256))
+        img_raw = Image.open(BytesIO(contents)).convert("RGB")
+        img_display = img_raw.resize((256, 256))
         save_path = os.path.join("app/uploads", image.filename)
         img_display.save(save_path, format="JPEG")
+        img_tensor = model_transform(img_raw).unsqueeze(0)
+        img_tensor = img_tensor.to(device, memory_format=torch.channels_last)
 
-        # --- Prepare image for model ---
-        img_model = Image.open(save_path).convert("RGB")
-        img_tensor = model_transform(img_model).unsqueeze(0)
-
-        # --- Run prediction ---
+        # ---- Model Prediction ----
         with torch.no_grad():
             output = model(img_tensor)
             pred = torch.argmax(output, dim=1).item()
-        result = "Deepfake" if pred == 1 else "Real"
 
-        # --- Update upload history ---
+        result = "Deepfake" if pred == 0 else "Real"
+
+        # ---- Update history ----
         upload_results.insert(0, {"file": image.filename, "result": result})
         if len(upload_results) > MAX_HISTORY:
             upload_results.pop()
@@ -118,11 +139,6 @@ async def upload_image(request: Request, image: UploadFile = File(...)):
                 "upload_results": upload_results
             }
         )
+
     except Exception as e:
         return JSONResponse({"error": str(e)}, status_code=500)
-
-@app.post("/start-fl-server")
-async def start_fl_training():
-    thread = threading.Thread(target=start_fl_server, daemon=True)
-    thread.start()
-    return JSONResponse({"status": "Federated Learning training started!"})
