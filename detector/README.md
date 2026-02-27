@@ -9,3 +9,6 @@ This will allow for upload and detection of deep-fake images.
 ## Training
 1. run "python train.py"
 The system will begin training on the dataset and will save the best model to the system for future use.
+
+## Notes
+Federated learning infrastructure is implemented using FLower. The current deployment uses a per-trained model for inference and the architecture supports federated training and aggregation. Integrating the aggregated global model into the love inference pipleine would be a future update.
